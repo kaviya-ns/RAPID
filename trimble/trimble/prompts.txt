@@ -1,0 +1,32 @@
+all the AI chat prompts i used 
+1. Can you suggest an ideal tech stack for this project?
+2. can i go with react+flask ?
+3. Will integrating ArcGIS API work for map visualization
+4. how to integrate openweather api in my project ?
+5. TypeError: Cannot read properties of null (reading 'useRef') error
+6.can you suggest me some ideas on how i can further improve this project
+7.in my server.py i have given resources right . like number of beds and all . is it possible to get real time updates on how many beds are there in a hospital like that ?
+8.is there a way i can combine the execution of all these server files in a single command ?
+7.ImportError: cannot import name 'app' from partially initialized module 'server.server' (most likely due to a circular import) (D:\projects\trimble\trimble\server\server.py)
+8.sqlalchemy.exc.OperationalError: (psycopg2.OperationalError) connection to server at "localhost" (::1), port 5432 failed: Connection refused (0x0000274D/10061) PostgreSQL Setup and Connection Fix
+
+9.RuntimeError: Working outside of application context
+
+10.ERROR
+view.popup.on is not a function
+TypeError: view.popup.on is not a function
+11. ERROR
+view.off is not a function
+TypeError: view.off is not a function
+12. Uncaught runtime errors:
+×
+ERROR
+Cannot read properties of undefined (reading 'forEach') TypeError: Cannot read properties of undefined (reading 'forEach')
+13. im getting network error when i try to log in Network error. Please try again.
+14.im getting invalid username or password . i printed the os.getenv to see if it fetches and it does but im still getting error.
+
+15.The facilities like hospitals shelters are not being shown on the map"
+16.The map was supposed to display all the hospitals shelters but it doesn't. It fetches information from API properly but it doesn't display the flood risk regions or 17.the hospitals shelters and all
+18.for shelter facilites im getting 0 for evacuation center and capacity but the other resources are displaying fine
+19.Handle PostGIS extension permission requirements
+20.how do i make sure that update and delete buttons are not visible to field role ?

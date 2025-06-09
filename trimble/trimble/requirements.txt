@@ -1,0 +1,11 @@
+Flask
+flask-cors
+python-dotenv
+requests
+Flask-SocketIO
+python-engineio
+python-socketio
+geopandas
+SQLAlchemy
+Flask-SQLAlchemy
+GeoAlchemy2
