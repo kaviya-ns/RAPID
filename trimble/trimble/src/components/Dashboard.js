@@ -129,7 +129,7 @@ const Dashboard = () => {
       </main>
 
       <footer style={styles.footer}>
-        <p>© 2023 National Disaster Management Authority | Emergency Hotline: 1078</p>
+        <p>Chennai Disaster Management Authority | Emergency Hotline: 1078</p>
         <p style={styles.footerNote}>Last updated: {new Date().toLocaleString()}</p>
       </footer>
     </div>
