@@ -2,14 +2,13 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
-function RainOverlay({ isTesting = false, refreshInterval = 30000 }) {
+function RainOverlay({  refreshInterval = 30000 }) {
   const [rainData, setRainData] = useState(null);
   const [error, setError] = useState(null);
-  const navigate = useNavigate();
 
   const fetchRainData = async () => {
     try {
-      const endpoint = isTesting ? '/api/test-rainfall' : '/api/rainfall';
+      const endpoint = '/api/rainfall';
       const response = await fetch(endpoint);
       
       if (!response.ok) {
@@ -36,7 +35,7 @@ function RainOverlay({ isTesting = false, refreshInterval = 30000 }) {
     
     // Cleanup
     return () => clearInterval(interval);
-  }, [isTesting, refreshInterval]);
+  }, [refreshInterval]);
 
   const getAlertLevel = () => {
     if (!rainData) return 'loading';

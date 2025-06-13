@@ -1,3 +1,4 @@
+//src/components/Response.js
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 
@@ -57,69 +58,7 @@ const Response = () => {
       setUserRole('field'); // Default to most restrictive role on error
     }
   };
-
-  // Fetch username from API
-  const fetchUsername = async (setUsername) => {
-    try {
-      const response = await fetch('/api/user/profile', {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      });
-    
-      if (response.ok) {
-        const userData = await response.json();
-        if (setUsername) setUsername(userData.username || ''); // Set username or empty string
-        return userData.username;
-      } else {
-        console.error('Failed to fetch username');
-        if (setUsername) setUsername(''); // Clear username on error
-        return null;
-      }
-    } catch (err) {
-      console.error('Error fetching username:', err);
-      if (setUsername) setUsername(''); // Clear username on error
-      return null;
-    }
-  };
-
-  // Fetch complete user profile (username + role)
-  const fetchUserProfile = async (setUsername, setUserRole) => {
-    try {
-      const response = await fetch('/api/user/profile', {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      });
-    
-      if (response.ok) {
-        const userData = await response.json();
-        const username = userData.username || '';
-        const role = userData.role || 'field';
         
-        if (setUsername) setUsername(username);
-        if (setUserRole) setUserRole(role);
-        
-        return { username, role };
-      } else {
-        // Handle authentication errors
-        if (response.status === 401) {
-          console.warn('User not authenticated');
-          // Redirect to login or handle as needed
-        }
-        if (setUsername) setUsername('');
-        if (setUserRole) setUserRole('field');
-        return null;
-      }
-    } catch (err) {
-      console.error('Error fetching user profile:', err);
-      if (setUsername) setUsername('');
-      if (setUserRole) setUserRole('field');
-      return null;
-    }
-  };
   // Fetch actions from API
   const fetchActions = async () => {
     setLoading(true);

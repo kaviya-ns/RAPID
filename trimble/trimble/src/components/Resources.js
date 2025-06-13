@@ -1,240 +1,667 @@
+//src/componenets/resources.js
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import ResourceCrudModal from './ResourceCrudModal';
 
 export default function Resources() {
-    // State for active resource category tab
     const [activeTab, setActiveTab] = useState('supplies');
     const [user, setUser] = useState(null);
-    
-     useEffect(() => {
-        fetch('/api/user/profile')
-        .then(res => res.json())
-        .then(data => {
-            if (data.success && data.user) setUser(data.user);
-        });
-    }, []);
-    // Emergency Resources Data - This will now be populated by the API
-    const [emergencyResources, setEmergencyResources] = useState({
-        supplies: [],
-        vehicles: [],
-        personnel: [],
-        shelters: []
-    });
-    const [showCrudModal, setShowCrudModal] = useState(false);
-    const [facilities, setFacilities] = useState([]);
-    const resourceTabs = {
-        shelter: "Shelter Facilities",
-        supply_center: "Supply Center",
-        hospital: "Hospitals",
-        command_center: "Command Center",
-        vehicles: "Vehicles and Equipment",
-        personnel: "Personnel"
-    };
-    // States for API fetched data
-    const [apiFetchedResourcesData, setApiFetchedResourcesData] = useState(null);
+    const [facilities, setFacilities] = useState({});
+    const [selectedFacility, setSelectedFacility] = useState(null);
+    const [facilityResources, setFacilityResources] = useState([]);
+    const [showAddModal, setShowAddModal] = useState(false);
+    const [showEditModal, setShowEditModal] = useState(false);
+    const [editingResource, setEditingResource] = useState(null);
+    const [loading, setLoading] = useState(false);
 
     const navigate = useNavigate();
 
-    // Fetch dashboard summary data
-    const fetchDashboardSummary = async () => {
+    // Form state for adding/editing resources
+    const [formData, setFormData] = useState({});
+
+    useEffect(() => {
+        fetch('/api/user/profile')
+            .then(res => res.json())
+            .then(data => {
+                if (data.success && data.user) setUser(data.user);
+            });
+        
+        fetchFacilities();
+    }, []);
+
+    // Add this useEffect to handle shelters when activeTab changes
+    useEffect(() => {
+        if (activeTab === 'shelters') {
+            fetchShelters();
+        } else {
+            // Reset selection when switching away from shelters
+            setSelectedFacility(null);
+            setFacilityResources([]);
+        }
+    }, [activeTab]);
+
+    const fetchFacilities = async () => {
         try {
-            const response = await fetch('/api/dashboard/summary');
+            const response = await fetch('/api/resources/facilities');
             const data = await response.json();
-            if (response.ok) {
-                // Update the emergencyResources state directly with fetched data
-                setEmergencyResources({
-                    supplies: data.supplies,
-                    vehicles: data.vehicles,
-                    personnel: data.personnel,
-                    shelters: data.shelters
-                });
-                setApiFetchedResourcesData(data); // Keep a copy of the raw fetched data if needed
-            } else {
-                console.error('Error fetching dashboard summary:', data.error);
+            if (data.success) {
+                setFacilities(data.facilities);
             }
         } catch (error) {
-            console.error('Network error fetching dashboard summary:', error);
-        }
-    };
-     // Fetch facilities for CRUD (shelters, supply centers, etc)
-    useEffect(() => {
-        fetch('/api/facilities')
-        .then(res => res.json())
-        .then(data => setFacilities(Array.isArray(data) ? data : (Array.isArray(data.facilities) ? data.facilities : [])))
-        .catch(() => setFacilities([]));
-    }, [showCrudModal]); // refetch after CRUD
-
-    // CRUD handlers
-    const handleUpdateFacility = async (facility) => {
-        await fetch(`/api/facilities/${facility.id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(facility)
-        });
-    };
-    const handleDeleteFacility = async (facilityId) => {
-        await fetch(`/api/facilities/${facilityId}`, { method: 'DELETE' });
-    };
-    const handleAddFacility = async (facility) => {
-        await fetch('/api/facilities', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(facility)
-        });
-    };
-    // Effect to get user location and fetch initial data on component mount
-    useEffect(() => {
-
-        // Fetch dashboard summary immediately on mount
-        fetchDashboardSummary();
-    }, []); // Empty dependency array, runs once on component mount
-
-    // Helper function to determine status color
-    const getStatusColor = (status) => {
-        switch (status) {
-            case 'adequate': return '#4CAF50';
-            case 'low': return '#FF9800';
-            case 'critical': return '#F44336';
-            default: return '#2196F3'; // Default color for unknown status
+            console.error('Error fetching facilities:', error);
         }
     };
 
-    // Renders an individual resource card for dashboard summaries
-    const renderSummaryResourceCard = (resource, index) => {
-        return (
-            <div key={index} style={styles.resourceCard}>
-                <div style={styles.resourceHeader}>
-                    <h3 style={styles.resourceTitle}>{resource.name}</h3>
-                    <div style={{
-                        ...styles.statusBadge,
-                        backgroundColor: getStatusColor(resource.status),
-                        color: 'white'
-                    }}>
-                        {resource.status.toUpperCase()}
-                    </div>
-                </div>
-
-                <div style={styles.resourceStats}>
-                    <div style={styles.statsRow}>
-                        <span style={styles.currentValue}>{resource.current}</span>
-                        <span style={styles.totalValue}>/ {resource.total} {resource.unit}</span>
-                        <span style={styles.percentage}>{resource.percentage}%</span>
-                    </div>
-
-                    <div style={styles.progressBar}>
-                        <div
-                            style={{
-                                ...styles.progressFill,
-                                width: `${resource.percentage}%`,
-                                backgroundColor: getStatusColor(resource.status)
-                            }}
-                        />
-                    </div>
-
-                    {resource.needsReplenishment && (
-                        <div style={styles.replenishmentAlert}>
-                            <span style={styles.alertIcon}>⚠️</span>
-                            Replenishment needed
-                        </div>
-                    )}
-                </div>
-            </div>
-        );
-    };
-
-    // Renders supply items grouped by facility
-    const renderGroupedSupplies = () => {
-        const suppliesData = apiFetchedResourcesData?.supplies || [];
-
-        // Group supplies by facility name
-        const suppliesByFacility = suppliesData.reduce((acc, item) => {
-            const facilityName = item.facility_name || 'Unassigned Supplies'; // Assuming item has facility_name
-            if (!acc[facilityName]) {
-                acc[facilityName] = [];
+    const fetchFacilityResources = async (facilityId, resourceType) => {
+        setLoading(true);
+        try {
+            let endpoint = '';
+            switch (resourceType) {
+                case 'supplies':
+                    endpoint = `/api/resources/supplies/${facilityId}`;
+                    break;
+                case 'vehicles':
+                    endpoint = `/api/resources/vehicles/${facilityId}`;
+                    break;
+                case 'personnel':
+                    endpoint = `/api/resources/personnel/${facilityId}`;
+                    break;
+                default:
+                    return;
             }
-            acc[facilityName].push(item);
-            return acc;
-        }, {});
 
-        if (Object.keys(suppliesByFacility).length === 0) {
-            return <div style={styles.noResults}>No supply data available.</div>;
+            const response = await fetch(endpoint);
+            const data = await response.json();
+            if (data.success) {
+                setFacilityResources(data[resourceType] || []);
+            }
+        } catch (error) {
+            console.error('Error fetching facility resources:', error);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const fetchShelters = async () => {
+        setLoading(true);
+        try {
+            const response = await fetch('/api/resources/shelters');
+            const data = await response.json();
+            if (data.success) {
+                setFacilityResources(data.shelters || []);
+            }
+        } catch (error) {
+            console.error('Error fetching shelters:', error);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleAddResource = async () => {
+        try {
+            let endpoint = '';
+            let payload = { ...formData };
+
+            if (selectedFacility) {
+                payload.facility_id = selectedFacility.id;
+            }
+
+            switch (activeTab) {
+                case 'supplies':
+                    endpoint = '/api/resources/supplies';
+                    break;
+                case 'vehicles':
+                    endpoint = '/api/resources/vehicles';
+                    break;
+                case 'personnel':
+                    endpoint = '/api/resources/personnel';
+                    break;
+                case 'shelters':
+                    endpoint = '/api/resources/shelters';
+                    payload.location = payload.location || 'POINT(0 0)'; // Default or get from form
+                    break;
+                default:
+                    return;
+            }
+
+            const response = await fetch(endpoint, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+
+            const data = await response.json();
+            if (data.success) {
+                setShowAddModal(false);
+                setFormData({});
+                if (activeTab === 'shelters') {
+                    fetchShelters();
+                } else if (selectedFacility) {
+                    fetchFacilityResources(selectedFacility.id, activeTab);
+                }
+            } else {
+                alert('Error adding resource: ' + data.error);
+            }
+        } catch (error) {
+            console.error('Error adding resource:', error);
+            alert('Error adding resource');
+        }
+    };
+
+    const handleUpdateResource = async () => {
+        try {
+            let endpoint = '';
+            switch (activeTab) {
+                case 'supplies':
+                    endpoint = `/api/resources/supplies/${editingResource.id}`;
+                    break;
+                case 'vehicles':
+                    endpoint = `/api/resources/vehicles/${editingResource.id}`;
+                    break;
+                case 'personnel':
+                    endpoint = `/api/resources/personnel/${editingResource.id}`;
+                    break;
+                case 'shelters':
+                    endpoint = `/api/resources/shelters/${editingResource.id}`;
+                    break;
+                default:
+                    return;
+            }
+
+            const response = await fetch(endpoint, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(formData)
+            });
+
+            const data = await response.json();
+            if (data.success) {
+                setShowEditModal(false);
+                setFormData({});
+                setEditingResource(null);
+                if (activeTab === 'shelters') {
+                    fetchShelters();
+                } else if (selectedFacility) {
+                    fetchFacilityResources(selectedFacility.id, activeTab);
+                }
+            } else {
+                alert('Error updating resource: ' + data.error);
+            }
+        } catch (error) {
+            console.error('Error updating resource:', error);
+            alert('Error updating resource');
+        }
+    };
+
+    const handleDeleteResource = async (resourceId) => {
+        if (!window.confirm('Are you sure you want to delete this resource?')) return;
+
+        try {
+            let endpoint = '';
+            switch (activeTab) {
+                case 'supplies':
+                    endpoint = `/api/resources/supplies/${resourceId}`;
+                    break;
+                case 'vehicles':
+                    endpoint = `/api/resources/vehicles/${resourceId}`;
+                    break;
+                case 'personnel':
+                    endpoint = `/api/resources/personnel/${resourceId}`;
+                    break;
+                case 'shelters':
+                    endpoint = `/api/resources/shelters/${resourceId}`;
+                    break;
+                default:
+                    return;
+            }
+
+            const response = await fetch(endpoint, { method: 'DELETE' });
+            const data = await response.json();
+            
+            if (data.success) {
+                if (activeTab === 'shelters') {
+                    fetchShelters();
+                } else if (selectedFacility) {
+                    fetchFacilityResources(selectedFacility.id, activeTab);
+                }
+            } else {
+                alert('Error deleting resource: ' + data.error);
+            }
+        } catch (error) {
+            console.error('Error deleting resource:', error);
+            alert('Error deleting resource');
+        }
+    };
+
+    const openEditModal = (resource) => {
+        setEditingResource(resource);
+        setFormData({ ...resource });
+        setShowEditModal(true);
+    };
+
+    const getFacilitiesForTab = () => {
+        switch (activeTab) {
+            case 'supplies':
+                return [...(facilities.hospitals || []), ...(facilities.supply_centers || [])];
+            case 'vehicles':
+                return facilities.command_centers || [];
+            case 'personnel':
+                return [...(facilities.hospitals || []), ...(facilities.ngo_centers || []), ...(facilities.command_centers || [])];
+            case 'shelters':
+                return facilities.shelters || [];
+            default:
+                return [];
+        }
+    };
+
+    const renderFacilityList = () => {
+        const facilitiesForTab = getFacilitiesForTab();
+        
+        if (activeTab === 'shelters') {
+            // For shelters, show them directly - the useEffect will handle fetching
+            return (
+                <div style={styles.facilityGrid}>
+                    {facilityResources.map(shelter => (
+                        <div key={shelter.id} style={styles.facilityCard}>
+                            <h3>{shelter.name}</h3>
+                            <p>Capacity: {shelter.capacity_overall || 'Not specified'}</p>
+                            <p>Status: {shelter.status}</p>
+                            <p>Contact: {shelter.contact_info || 'N/A'}</p>
+                            {shelter.description && <p>Description: {shelter.description}</p>}
+                            {user && (user.role === 'command' || user.role === 'admin') && (
+                                <div style={styles.buttonGroup}>
+                                    <button 
+                                        style={styles.editButton}
+                                        onClick={() => openEditModal(shelter)}
+                                    >
+                                        Edit
+                                    </button>
+                                    <button 
+                                        style={styles.deleteButton}
+                                        onClick={() => handleDeleteResource(shelter.id)}
+                                    >
+                                        Delete
+                                    </button>
+                                </div>
+                            )}
+                        </div>
+                    ))}
+                </div>
+            );
         }
 
         return (
-            <div style={styles.groupedContainer}>
-                {Object.entries(suppliesByFacility).map(([facilityName, items]) => (
-                    <div key={facilityName} style={styles.facilityGroup}>
-                        <h3 style={styles.facilityGroupTitle}>📦 {facilityName}</h3>
-                        <div style={styles.resourceGrid}>
-                            {items.map((item, index) => (
-                                <div key={index} style={styles.itemCard}>
-                                    <h4>{item.name}</h4>
-                                    <p>Current: {item.current} {item.unit}</p>
-                                    <p>Total Capacity: {item.total} {item.unit}</p>
-                                    <div style={styles.statusIndicator}>
-                                        <span style={{
-                                            ...styles.statusDot,
-                                            backgroundColor: getStatusColor(item.status)
-                                        }}></span>
-                                        {item.status.toUpperCase()} ({item.percentage}%)
-                                    </div>
-                                    {item.needsReplenishment && (
-                                        <p style={styles.replenishmentAlert}>⚠️ Replenishment needed</p>
-                                    )}
-                                </div>
-                            ))}
-                        </div>
+            <div style={styles.facilityGrid}>
+                {facilitiesForTab.map(facility => (
+                    <div 
+                        key={facility.id} 
+                        style={styles.facilityCard}
+                        onClick={() => {
+                            setSelectedFacility(facility);
+                            fetchFacilityResources(facility.id, activeTab);
+                        }}
+                    >
+                        <h3>{facility.name}</h3>
+                        <p>Type: {facility.type.replace('_', ' ').toUpperCase()}</p>
+                        <p>Status: {facility.status}</p>
+                        <p>Click to view {activeTab}</p>
                     </div>
                 ))}
             </div>
         );
     };
 
-    // Renders the main resource section based on active tab
-    const renderResourceSection = () => {
-        // Display API-fetched resources for the active tab (from dashboard summary)
-        if (apiFetchedResourcesData) {
-            if (activeTab === 'supplies') {
-                return renderGroupedSupplies(); // Special rendering for supplies
-            } else {
-                const currentResources = emergencyResources[activeTab]; // Use the updated state
-                if (currentResources && currentResources.length > 0) {
-                    return (
-                        <div style={styles.resourceGrid}>
-                            {currentResources.map((resource, index) => renderSummaryResourceCard(resource, index))}
-                        </div>
-                    );
-                }
-            }
+    const renderResourceList = () => {
+        if (!selectedFacility && activeTab !== 'shelters') {
+            return <div style={styles.noSelection}>Select a facility to view resources</div>;
         }
 
-        return <div style={styles.noResults}>No resources found for this category.</div>;
+        if (loading) {
+            return <div style={styles.loading}>Loading resources...</div>;
+        }
+
+        return (
+            <div>
+                {selectedFacility && (
+                    <div style={styles.selectedFacilityHeader}>
+                        <h3>{selectedFacility.name} - {activeTab.toUpperCase()}</h3>
+                        <button 
+                            style={styles.backButton}
+                            onClick={() => {
+                                setSelectedFacility(null);
+                                setFacilityResources([]);
+                            }}
+                        >
+                            ← Back to Facilities
+                        </button>
+                    </div>
+                )}
+                
+                {user && (user.role === 'command' || user.role === 'admin') && (
+                    <button 
+                        style={styles.addButton}
+                        onClick={() => setShowAddModal(true)}
+                    >
+                        Add New {activeTab.slice(0, -1)}
+                    </button>
+                )}
+
+                <div style={styles.resourceGrid}>
+                    {facilityResources.map(resource => (
+                        <div key={resource.id} style={styles.resourceCard}>
+                            {renderResourceCardContent(resource)}
+                            {user && (user.role === 'command' || user.role === 'admin') && (
+                                <div style={styles.buttonGroup}>
+                                    <button 
+                                        style={styles.editButton}
+                                        onClick={() => openEditModal(resource)}
+                                    >
+                                        Edit
+                                    </button>
+                                    <button 
+                                        style={styles.deleteButton}
+                                        onClick={() => handleDeleteResource(resource.id)}
+                                    >
+                                        Delete
+                                    </button>
+                                </div>
+                            )}
+                        </div>
+                    ))}
+                </div>
+            </div>
+        );
     };
 
+    const renderResourceCardContent = (resource) => {
+        switch (activeTab) {
+            case 'supplies':
+                return (
+                    <>
+                        <h4>{resource.item_name}</h4>
+                        <p>Current: {resource.quantity_current} {resource.unit}</p>
+                        <p>Capacity: {resource.quantity_capacity} {resource.unit}</p>
+                        <p>Status: {resource.status}</p>
+                    </>
+                );
+            case 'vehicles':
+                return (
+                    <>
+                        <h4>{resource.vehicle_type}</h4>
+                        <p>License: {resource.license_plate || 'N/A'}</p>
+                        <p>Status: {resource.status}</p>
+                        <p>Capacity: {resource.capacity_load || 'N/A'}</p>
+                        <p>Assigned to: {resource.assigned_to || 'Unassigned'}</p>
+                    </>
+                );
+            case 'personnel':
+                return (
+                    <>
+                        <h4>{resource.name}</h4>
+                        <p>Role: {resource.role}</p>
+                        <p>Status: {resource.status}</p>
+                        <p>Skills: {resource.skills || 'N/A'}</p>
+                        <p>Contact: {resource.contact_number || 'N/A'}</p>
+                        <p>Assignment: {resource.current_assignment || 'None'}</p>
+                    </>
+                );
+            case 'shelters':
+                return (
+                    <>
+                        <h4>{resource.name}</h4>
+                        <p>Capacity: {resource.capacity_overall || 'Not specified'}</p>
+                        <p>Status: {resource.status}</p>
+                        <p>Contact: {resource.contact_info || 'N/A'}</p>
+                        {resource.description && <p>Description: {resource.description}</p>}
+                    </>
+                );
+            default:
+                return null;
+        }
+    };
+
+    const renderAddModal = () => {
+        if (!showAddModal) return null;
+
+        return (
+            <div style={styles.modalOverlay}>
+                <div style={styles.modal}>
+                    <h3>Add New {activeTab.slice(0, -1)}</h3>
+                    {renderFormFields()}
+                    <div style={styles.modalButtons}>
+                        <button style={styles.saveButton} onClick={handleAddResource}>
+                            Add
+                        </button>
+                        <button style={styles.cancelButton} onClick={() => {
+                            setShowAddModal(false);
+                            setFormData({});
+                        }}>
+                            Cancel
+                        </button>
+                    </div>
+                </div>
+            </div>
+        );
+    };
+
+    const renderEditModal = () => {
+        if (!showEditModal) return null;
+
+        return (
+            <div style={styles.modalOverlay}>
+                <div style={styles.modal}>
+                    <h3>Edit {activeTab.slice(0, -1)}</h3>
+                    {renderFormFields()}
+                    <div style={styles.modalButtons}>
+                        <button style={styles.saveButton} onClick={handleUpdateResource}>
+                            Update
+                        </button>
+                        <button style={styles.cancelButton} onClick={() => {
+                            setShowEditModal(false);
+                            setFormData({});
+                            setEditingResource(null);
+                        }}>
+                            Cancel
+                        </button>
+                    </div>
+                </div>
+            </div>
+        );
+    };
+
+    const renderFormFields = () => {
+        switch (activeTab) {
+            case 'supplies':
+                return (
+                    <>
+                        <input
+                            type="text"
+                            placeholder="Item Name"
+                            value={formData.item_name || ''}
+                            onChange={(e) => setFormData({...formData, item_name: e.target.value})}
+                            style={styles.input}
+                        />
+                        <input
+                            type="number"
+                            placeholder="Current Quantity"
+                            value={formData.quantity_current || ''}
+                            onChange={(e) => setFormData({...formData, quantity_current: parseInt(e.target.value)})}
+                            style={styles.input}
+                        />
+                        <input
+                            type="number"
+                            placeholder="Capacity"
+                            value={formData.quantity_capacity || ''}
+                            onChange={(e) => setFormData({...formData, quantity_capacity: parseInt(e.target.value)})}
+                            style={styles.input}
+                        />
+                        <input
+                            type="text"
+                            placeholder="Unit (e.g., kg, pieces)"
+                            value={formData.unit || ''}
+                            onChange={(e) => setFormData({...formData, unit: e.target.value})}
+                            style={styles.input}
+                        />
+                        <select
+                            value={formData.status || 'adequate'}
+                            onChange={(e) => setFormData({...formData, status: e.target.value})}
+                            style={styles.input}
+                        >
+                            <option value="adequate">Adequate</option>
+                            <option value="low">Low</option>
+                            <option value="critical">Critical</option>
+                        </select>
+                    </>
+                );
+            case 'vehicles':
+                return (
+                    <>
+                        <input
+                            type="text"
+                            placeholder="Vehicle Type"
+                            value={formData.vehicle_type || ''}
+                            onChange={(e) => setFormData({...formData, vehicle_type: e.target.value})}
+                            style={styles.input}
+                        />
+                        <input
+                            type="text"
+                            placeholder="License Plate"
+                            value={formData.license_plate || ''}
+                            onChange={(e) => setFormData({...formData, license_plate: e.target.value})}
+                            style={styles.input}
+                        />
+                        <select
+                            value={formData.status || 'available'}
+                            onChange={(e) => setFormData({...formData, status: e.target.value})}
+                            style={styles.input}
+                        >
+                            <option value="available">Available</option>
+                            <option value="in_use">In Use</option>
+                            <option value="maintenance">Maintenance</option>
+                            <option value="out_of_service">Out of Service</option>
+                        </select>
+                        <input
+                            type="text"
+                            placeholder="Capacity/Load"
+                            value={formData.capacity_load || ''}
+                            onChange={(e) => setFormData({...formData, capacity_load: e.target.value})}
+                            style={styles.input}
+                        />
+                        <input
+                            type="text"
+                            placeholder="Assigned To"
+                            value={formData.assigned_to || ''}
+                            onChange={(e) => setFormData({...formData, assigned_to: e.target.value})}
+                            style={styles.input}
+                        />
+                    </>
+                );
+            case 'personnel':
+                return (
+                    <>
+                        <input
+                            type="text"
+                            placeholder="Name"
+                            value={formData.name || ''}
+                            onChange={(e) => setFormData({...formData, name: e.target.value})}
+                            style={styles.input}
+                        />
+                        <input
+                            type="text"
+                            placeholder="Role"
+                            value={formData.role || ''}
+                            onChange={(e) => setFormData({...formData, role: e.target.value})}
+                            style={styles.input}
+                        />
+                        <textarea
+                            placeholder="Skills"
+                            value={formData.skills || ''}
+                            onChange={(e) => setFormData({...formData, skills: e.target.value})}
+                            style={styles.textarea}
+                        />
+                        <select
+                            value={formData.status || 'available'}
+                            onChange={(e) => setFormData({...formData, status: e.target.value})}
+                            style={styles.input}
+                        >
+                            <option value="available">Available</option>
+                            <option value="assigned">Assigned</option>
+                            <option value="off_duty">Off Duty</option>
+                            <option value="unavailable">Unavailable</option>
+                        </select>
+                        <input
+                            type="text"
+                            placeholder="Current Assignment"
+                            value={formData.current_assignment || ''}
+                            onChange={(e) => setFormData({...formData, current_assignment: e.target.value})}
+                            style={styles.input}
+                        />
+                        <input
+                            type="text"
+                            placeholder="Contact Number"
+                            value={formData.contact_number || ''}
+                            onChange={(e) => setFormData({...formData, contact_number: e.target.value})}
+                            style={styles.input}
+                        />
+                    </>
+                );
+            case 'shelters':
+                return (
+                    <>
+                        <input
+                            type="text"
+                            placeholder="Shelter Name"
+                            value={formData.name || ''}
+                            onChange={(e) => setFormData({...formData, name: e.target.value})}
+                            style={styles.input}
+                        />
+                        <input
+                            type="number"
+                            placeholder="Capacity"
+                            value={formData.capacity_overall || ''}
+                            onChange={(e) => setFormData({...formData, capacity_overall: parseInt(e.target.value)})}
+                            style={styles.input}
+                        />
+                        <select
+                            value={formData.status || 'operational'}
+                            onChange={(e) => setFormData({...formData, status: e.target.value})}
+                            style={styles.input}
+                        >
+                            <option value="operational">Operational</option>
+                            <option value="full">Full</option>
+                            <option value="maintenance">Maintenance</option>
+                            <option value="closed">Closed</option>
+                        </select>
+                        <input
+                            type="text"
+                            placeholder="Contact Info"
+                            value={formData.contact_info || ''}
+                            onChange={(e) => setFormData({...formData, contact_info: e.target.value})}
+                            style={styles.input}
+                        />
+                        <textarea
+                            placeholder="Description"
+                            value={formData.description || ''}
+                            onChange={(e) => setFormData({...formData, description: e.target.value})}
+                            style={styles.textarea}
+                        />
+                        <input
+                            type="text"
+                            placeholder="Location (optional)"
+                            value={formData.location || ''}
+                            onChange={(e) => setFormData({...formData, location: e.target.value})}
+                            style={styles.input}
+                        />
+                    </>
+                );
+            default:
+                return null;
+        }
+    };
 
     return (
         <div style={styles.container}>
-            <h1 style={styles.header}>Emergency Resources Dashboard</h1>
-             <div style={{ textAlign: 'right', margin: '20px 0' }}>
-                {user && (user.role === 'command' || user.role === 'admin') && (
-        <div style={{ textAlign: 'right', margin: '20px 0' }}>
-          <button onClick={() => setShowCrudModal(true)}>
-            Add/Update/Delete Resource
-          </button>
-        </div>
-      )}
-      </div>
-      <ResourceCrudModal
-        show={showCrudModal}
-        onClose={() => setShowCrudModal(false)}
-        resourceTabs={resourceTabs}
-        facilities={facilities}
-        onUpdate={handleUpdateFacility}
-        onDelete={handleDeleteFacility}
-        onAdd={handleAddFacility}
-      />
-
+            <h1 style={styles.header}>Emergency Resources Management</h1>
+            
             {/* Resource Category Tabs */}
             <div style={styles.tabContainer}>
                 {[
@@ -251,6 +678,8 @@ export default function Resources() {
                         }}
                         onClick={() => {
                             setActiveTab(tab.key);
+                            setSelectedFacility(null);
+                            setFacilityResources([]);
                         }}
                     >
                         <span style={styles.tabIcon}>{tab.icon}</span>
@@ -261,9 +690,12 @@ export default function Resources() {
 
             <div style={styles.content}>
                 <div style={styles.listContainer}>
-                    {renderResourceSection()}
+                    {!selectedFacility && activeTab !== 'shelters' ? renderFacilityList() : renderResourceList()}
                 </div>
             </div>
+
+            {renderAddModal()}
+            {renderEditModal()}
 
             <button
                 style={styles.backButton}
@@ -275,274 +707,199 @@ export default function Resources() {
     );
 }
 
-// Consolidated and Enhanced Styles object
+// Styles
 const styles = {
     container: {
         padding: '20px',
-        maxWidth: '1200px',
-        margin: '0 auto',
         fontFamily: 'Arial, sans-serif',
-        backgroundColor: '#f4f7f6',
-        borderRadius: '8px',
-        boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
-        marginBottom: '20px'
+        backgroundColor: '#f5f5f5',
+        minHeight: '100vh'
     },
     header: {
         textAlign: 'center',
-        color: '#003366',
-        marginBottom: '25px',
-        fontSize: '2.2em'
-    },
-    riskAlert: {
-        backgroundColor: '#fff3e0',
-        borderLeft: '5px solid #ff9800',
-        padding: '10px 15px',
-        marginBottom: '20px',
-        borderRadius: '4px',
-        color: '#333'
-    },
-    quickActionsContainer: {
-        marginBottom: '30px',
-        padding: '15px',
-        backgroundColor: '#ffffff',
-        borderRadius: '8px',
-        boxShadow: '0 2px 8px rgba(0,0,0,0.05)'
-    },
-    quickActionsTitle: {
-        color: '#003366',
-        marginBottom: '15px',
-        textAlign: 'center'
-    },
-    quickActionsGrid: {
-        display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))',
-        gap: '15px'
-    },
-    quickActionButton: {
-        display: 'flex',
-        alignItems: 'center',
-        padding: '15px',
-        backgroundColor: '#e0e9f1',
-        border: '1px solid #cce0f2',
-        borderRadius: '8px',
-        cursor: 'pointer',
-        transition: 'background-color 0.3s ease, border-color 0.3s ease',
-        '&:hover': {
-            backgroundColor: '#cce0f2',
-            borderColor: '#aadcff'
-        }
-    },
-    actionIconContainer: {
-        fontSize: '2em',
-        marginRight: '15px'
-    },
-    actionTextContainer: {
-        display: 'flex',
-        flexDirection: 'column'
-    },
-    actionMainText: {
-        fontWeight: 'bold',
-        color: '#003366',
-        fontSize: '1.1em'
-    },
-    actionSubText: {
-        fontSize: '0.85em',
-        color: '#555'
+        color: '#333',
+        marginBottom: '30px'
     },
     tabContainer: {
         display: 'flex',
         justifyContent: 'center',
-        marginBottom: '20px',
-        backgroundColor: '#e9ecef',
-        borderRadius: '8px',
-        overflow: 'hidden',
-        boxShadow: '0 2px 5px rgba(0,0,0,0.05)'
+        marginBottom: '30px',
+        flexWrap: 'wrap'
     },
     tabButton: {
-        flex: 1,
-        padding: '15px 20px',
-        fontSize: '1.05em',
-        fontWeight: 'bold',
-        color: '#003366',
-        background: 'none',
-        border: 'none',
-        borderBottom: '3px solid transparent',
+        padding: '12px 20px',
+        margin: '5px',
+        border: '2px solid #ddd',
+        backgroundColor: '#fff',
+        borderRadius: '8px',
         cursor: 'pointer',
-        transition: 'background-color 0.3s ease, border-color 0.3s ease, color 0.3s ease',
         display: 'flex',
         alignItems: 'center',
-        justifyContent: 'center',
         gap: '8px',
-        '&:hover': {
-            backgroundColor: '#dee2e6'
-        }
+        transition: 'all 0.3s'
     },
     activeTab: {
-        backgroundColor: '#003366',
+        backgroundColor: '#007bff',
         color: 'white',
-        borderBottomColor: '#007bff',
-        '&:hover': {
-            backgroundColor: '#003366' // Prevent hover effect on active tab
-        }
+        borderColor: '#007bff'
     },
     tabIcon: {
-        fontSize: '1.2em'
+        fontSize: '18px'
     },
     content: {
-        backgroundColor: '#ffffff',
-        padding: '20px',
-        borderRadius: '8px',
-        boxShadow: '0 2px 8px rgba(0,0,0,0.05)'
+        maxWidth: '1200px',
+        margin: '0 auto'
     },
     listContainer: {
-        minHeight: '300px' // Ensure some height even if no data
+        backgroundColor: 'white',
+        borderRadius: '10px',
+        padding: '20px',
+        boxShadow: '0 2px 10px rgba(0,0,0,0.1)'
+    },
+    facilityGrid: {
+        display: 'grid',
+        gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))',
+        gap: '20px'
+    },
+    facilityCard: {
+        padding: '20px',
+        border: '1px solid #ddd',
+        borderRadius: '8px',
+        cursor: 'pointer',
+        transition: 'all 0.3s',
+        backgroundColor: '#f9f9f9'
     },
     resourceGrid: {
         display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
-        gap: '20px'
+        gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
+        gap: '15px',
+        marginTop: '20px'
     },
     resourceCard: {
-        backgroundColor: '#f8f9fa',
-        border: '1px solid #e0e0e0',
-        borderRadius: '8px',
         padding: '15px',
-        boxShadow: '0 2px 5px rgba(0,0,0,0.05)',
-        transition: 'transform 0.2s ease-in-out',
-        '&:hover': {
-            transform: 'translateY(-3px)'
-        }
+        border: '1px solid #ddd',
+        borderRadius: '8px',
+        backgroundColor: '#fff'
     },
-    resourceHeader: {
+    selectedFacilityHeader: {
         display: 'flex',
         justifyContent: 'space-between',
         alignItems: 'center',
-        marginBottom: '10px'
+        marginBottom: '20px',
+        paddingBottom: '10px',
+        borderBottom: '2px solid #eee'
     },
-    resourceTitle: {
-        margin: 0,
-        color: '#003366',
-        fontSize: '1.2em'
-    },
-    statusBadge: {
-        padding: '5px 10px',
-        borderRadius: '20px',
-        fontSize: '0.8em',
-        fontWeight: 'bold'
-    },
-    resourceStats: {
+    buttonGroup: {
+        display: 'flex',
+        gap: '10px',
         marginTop: '10px'
     },
-    statsRow: {
-        display: 'flex',
-        alignItems: 'baseline',
-        marginBottom: '5px'
-    },
-    currentValue: {
-        fontSize: '1.5em',
-        fontWeight: 'bold',
-        color: '#333'
-    },
-    totalValue: {
-        fontSize: '0.9em',
-        color: '#777',
-        marginLeft: '5px'
-    },
-    percentage: {
-        fontSize: '1.1em',
-        fontWeight: 'bold',
-        marginLeft: 'auto',
-        color: '#007bff'
-    },
-    progressBar: {
-        backgroundColor: '#e0e0e0',
+    editButton: {
+        padding: '8px 15px',
+        backgroundColor: '#28a745',
+        color: 'white',
+        border: 'none',
         borderRadius: '5px',
-        height: '8px',
-        overflow: 'hidden',
-        marginBottom: '10px'
+        cursor: 'pointer'
     },
-    progressFill: {
-        height: '100%',
-        borderRadius: '5px'
+    deleteButton: {
+        padding: '8px 15px',
+        backgroundColor: '#dc3545',
+        color: 'white',
+        border: 'none',
+        borderRadius: '5px',
+        cursor: 'pointer'
     },
-    replenishmentAlert: {
-        backgroundColor: '#ffebee',
-        color: '#d32f2f',
-        padding: '8px',
-        borderRadius: '4px',
-        fontSize: '0.85em',
-        display: 'flex',
-        alignItems: 'center',
-        gap: '5px'
-    },
-    alertIcon: {
-        fontSize: '1.1em'
-    },
-    itemCard: {
-        backgroundColor: '#f8f9fa',
-        border: '1px solid #e0e0e0',
-        borderRadius: '8px',
-        padding: '15px',
-        boxShadow: '0 2px 5px rgba(0,0,0,0.05)',
-        transition: 'transform 0.2s ease-in-out',
-        '&:hover': {
-            transform: 'translateY(-3px)'
-        },
-        display: 'flex',
-        flexDirection: 'column',
-        justifyContent: 'space-between'
-    },
-    statusIndicator: {
-        display: 'flex',
-        alignItems: 'center',
-        marginTop: '10px',
-        fontSize: '0.9em',
-        color: '#555'
-    },
-    statusDot: {
-        width: '10px',
-        height: '10px',
-        borderRadius: '50%',
-        marginRight: '8px'
-    },
-    noResults: {
-        textAlign: 'center',
-        padding: '30px',
-        color: '#777',
-        fontSize: '1.1em'
-    },
-    backButton: {
-        display: 'block',
-        margin: '20px auto',
+    addButton: {
         padding: '10px 20px',
-        fontSize: '1em',
-        backgroundColor: '#003366',
+        backgroundColor: '#007bff',
         color: 'white',
         border: 'none',
         borderRadius: '5px',
         cursor: 'pointer',
-        transition: 'background-color 0.3s ease',
-        '&:hover': {
-            backgroundColor: '#002244'
-        }
+        marginBottom: '20px'
     },
-    groupedContainer: {
-        marginTop: '20px',
+    backButton: {
+        padding: '10px 20px',
+        backgroundColor: '#6c757d',
+        color: 'white',
+        border: 'none',
+        borderRadius: '5px',
+        cursor: 'pointer',
+        marginTop: '20px'
     },
-    facilityGroup: {
-        backgroundColor: '#ffffff',
-        border: '1px solid #ddd',
-        borderRadius: '8px',
-        marginBottom: '20px',
-        padding: '20px',
-        boxShadow: '0 2px 8px rgba(0,0,0,0.05)',
-    },
-    facilityGroupTitle: {
-        color: '#003366',
-        marginBottom: '15px',
-        fontSize: '1.5em',
+    modalOverlay: {
+        position: 'fixed',
+        top: 0,
+        left: 0,
+        width: '100vw',
+        height: '100vh',
+        backgroundColor: 'rgba(0,0,0,0.5)',
         display: 'flex',
         alignItems: 'center',
-        gap: '10px'
+        justifyContent: 'center',
+        zIndex: 1000
     },
+    modal: {
+        backgroundColor: 'white',
+        borderRadius: '10px',
+        padding: '30px',
+        minWidth: '400px',
+        maxWidth: '500px',
+        maxHeight: '80vh',
+        overflowY: 'auto'
+    },
+    input: {
+        width: '100%',
+        padding: '10px',
+        margin: '10px 0',
+        border: '1px solid #ddd',
+        borderRadius: '5px',
+        fontSize: '14px'
+    },
+    textarea: {
+        width: '100%',
+        padding: '10px',
+        margin: '10px 0',
+        border: '1px solid #ddd',
+        borderRadius: '5px',
+        fontSize: '14px',
+        minHeight: '80px',
+        resize: 'vertical'
+    },
+    modalButtons: {
+        display: 'flex',
+        gap: '10px',
+        marginTop: '20px'
+    },
+    saveButton: {
+        padding: '10px 20px',
+        backgroundColor: '#28a745',
+        color: 'white',
+        border: 'none',
+        borderRadius: '5px',
+        cursor: 'pointer',
+        flex: 1
+    },
+    cancelButton: {
+        padding: '10px 20px',
+        backgroundColor: '#6c757d',
+        color: 'white',
+        border: 'none',
+        borderRadius: '5px',
+        cursor: 'pointer',
+        flex: 1
+    },
+    noSelection: {
+        textAlign: 'center',
+        color: '#666',
+        fontSize: '18px',
+        padding: '40px'
+    },
+    loading: {
+        textAlign: 'center',
+        color: '#666',
+        fontSize: '16px',
+        padding: '20px'
+    }
 };

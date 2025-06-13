@@ -39,7 +39,6 @@ export default function MapViewer() {
     const [rainData, setRainData] = useState(null);
     const [rainfallPermissionDenied, setRainfallPermissionDenied] = useState(false);
     
-    // Missing state variables - FIXED
     const [analysisResults, setAnalysisResults] = useState([]);
     const [showBuffers, setShowBuffers] = useState(false);
     
@@ -104,7 +103,6 @@ export default function MapViewer() {
         }
     }, []);
 
-    // FIXED: Enhanced fetchRainData with better error handling
     const fetchRainData = useCallback(async () => {
         try {
             console.log('🌧️ Attempting to fetch rainfall data...');
@@ -389,7 +387,7 @@ export default function MapViewer() {
         };
     }, [fetchFloodZones, fetchFacilities, fetchRainData]);
 
-    // FIXED: Polling effect with proper dependencies
+    // Polling effect with proper dependencies
     useEffect(() => {
         if (!view) return;
 
@@ -543,7 +541,7 @@ export default function MapViewer() {
             }
 
             try {
-                // Enhanced validation with detailed logging
+                // validation with detailed logging
                 if (!facility.location) {
                     console.error(`   ❌ Facility "${facility.name}" has no location object`);
                     renderStats.errorCount++;
@@ -676,13 +674,6 @@ export default function MapViewer() {
                         rain_last_hour: rainData.rain_last_hour,
                         forecast: rainData.forecast
                     },
-                    popupTemplate: {
-                        title: "Current Rainfall",
-                        content: `<p>Rainfall: <strong>${rainData.rain_last_hour} mm/h</strong></p>
-                                  ${rainData.forecast?.risk ? `<p>Risk: <strong>${rainData.forecast.risk.toUpperCase()}</strong></p>` : ''}
-                                  ${rainData.forecast?.action ? `<p>Action: ${rainData.forecast.action}</p>` : ''}
-                                  `
-                    }
                 });
 
                 view.graphics.add(rainGraphic);
@@ -797,21 +788,6 @@ export default function MapViewer() {
                 }}
             >
                 Run Spatial Analysis
-            </button>
-
-            <button
-                onClick={() => view?.graphics.removeAll()}
-                style={{
-                    background: GOV_STYLES.accent,
-                    color: 'white',
-                    border: 'none',
-                    padding: '10px 16px',
-                    borderRadius: '6px',
-                    cursor: 'pointer',
-                    fontWeight: 'bold'
-                }}
-            >
-                Clear All Graphics
             </button>
 
             {/* Spatial Analysis Results - Below the buttons */}

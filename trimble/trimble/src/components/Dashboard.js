@@ -129,7 +129,7 @@ const Dashboard = () => {
       </main>
 
       <footer style={styles.footer}>
-        <p>Chennai Disaster Management Authority | Emergency Hotline: 1078</p>
+        <p>© 2023 National Disaster Management Authority | Emergency Hotline: 1078</p>
         <p style={styles.footerNote}>Last updated: {new Date().toLocaleString()}</p>
       </footer>
     </div>
@@ -158,7 +158,6 @@ const ActionPanel = ({ role, navigate }) => {
   const showMap = ['admin', 'command'].includes(role);
   const showResources = ['admin', 'command', 'field'].includes(role);
   const showResponse = ['admin', 'command', 'field'].includes(role);
-  const showAirSupport = ['admin', 'command'].includes(role);
 
   return (
     <section style={styles.actionPanel}>
@@ -175,7 +174,7 @@ const ActionPanel = ({ role, navigate }) => {
         {showResources && (
           <button 
             style={styles.primaryButton}
-            onClick={() => navigate('/resources')}
+            onClick={() => navigate('/resourcessummary')}
           >
             🏥 Resource Allocation
           </button>
@@ -227,14 +226,14 @@ const QuickLinks = () => (
   <section style={styles.quickLinks}>
     <h2 style={styles.sectionTitle}>Quick Access</h2>
     <div style={styles.linkGrid}>
-      <a href="https://imd.gov.in/pages/alerts_main.php" target="_blank" rel="noopener noreferrer" style={styles.linkCard}>
+      <a href="https://mausam.imd.gov.in/imd_latest/contents/all_india_forcast_bulletin.php" target="_blank" rel="noopener noreferrer" style={styles.linkCard}>
         📊 View IMD Weather Alerts
       </a>   
-      <a href="https://ndma.gov.in/en/disaster-management-plan.html" target="_blank" rel="noopener noreferrer" style={styles.linkCard}>
+      <a href="https://ndma.gov.in/" target="_blank" rel="noopener noreferrer" style={styles.linkCard}>
         📄 National Disaster Management Plan
       </a>
-      <a href="https://esahaya.tn.gov.in/" target="_blank" rel="noopener noreferrer" style={styles.linkCard}>
-        🧑‍🚒 eSahaya (Field Coordination Portal)
+      <a href="https://rsmcnewdelhi.imd.gov.in/" target="_blank" rel="noopener noreferrer" style={styles.linkCard}>
+        🌀 Cyclone Alerts
       </a>
       
       <a href="https://www.tnsdma.tn.gov.in/" target="_blank" rel="noopener noreferrer" style={styles.linkCard}>

@@ -1,4 +1,4 @@
-from flask import Flask, jsonify, request, session
+from flask import Flask, jsonify, request, session,Blueprint
 from flask_sqlalchemy import SQLAlchemy
 from geoalchemy2 import Geometry
 from sqlalchemy import func, text, cast, Integer, case
@@ -14,7 +14,7 @@ from flask_socketio import SocketIO
 from functools import wraps
 import json 
 import pytz
-
+bp = Blueprint('facilities', __name__)
 app = Flask(__name__)
 
 CORS(app, supports_credentials=True, origins=["http://localhost:3000"]) 
@@ -41,22 +41,6 @@ app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.secret_key = os.environ.get('FLASK_SECRET_KEY') # Provide a fallback for local testing
 # Initialize extensions with app
 db = SQLAlchemy(app)
-
-def serialize(self):
-        try:
-            geojson = db.session.scalar(func.ST_AsGeoJSON(self.geometry))
-        except Exception:
-            geojson = None
-
-        return {
-            'id': self.id,
-            'zone_name': self.zone_name,
-            'risk_level': self.risk_level,
-            'water_level': self.water_level,
-            'last_updated': self.last_updated.isoformat() if self.last_updated else None,
-            'description': self.description,
-            'geometry': json.loads(geojson) if geojson else None
-        }
 
 # Database Models 
 class FloodRiskZone(db.Model):
@@ -148,82 +132,6 @@ class ResponseAction(db.Model):
     status = db.Column(db.String(50), default='active') # 'active', 'pending', 'completed'
     created_at = db.Column(db.DateTime, default=datetime.now(pytz.utc))
     updated_at = db.Column(db.DateTime, default=datetime.now(pytz.utc), onupdate=datetime.now(pytz.utc))
-
-def _serialize_geometry(geom):
-    """Serializes a PostGIS geometry object to GeoJSON format."""
-    if geom:
-        return json.loads(geo_to_shape(geom).to_json()) # Use the aliased name
-    return None
-
-def _flood_risk_zone_to_dict(zone):
-    """Helper to serialize FloodRiskZone object including geometry."""
-    return {
-        "id": zone.id,
-        "zone_name": zone.zone_name,
-        "risk_level": zone.risk_level,
-        "water_level": zone.water_level,
-        "last_updated": zone.last_updated.isoformat() if zone.last_updated else None,
-        "description": zone.description,
-        "geometry": _serialize_geometry(zone.geometry)
-    }
-
-def _facility_to_dict(facility):
-    """Helper to serialize EmergencyFacility object including geometry."""
-    return {
-        "id": facility.id,
-        "name": facility.name,
-        "type": facility.type,
-        "status": facility.status,
-        "contact_info": facility.contact_info,
-        "capacity_overall": facility.capacity_overall,
-        "description": facility.description,
-        "last_updated": facility.last_updated.isoformat() if facility.last_updated else None,
-        "location": {
-            'lat': db.session.scalar(func.ST_Y(facility.location)),
-            'lng': db.session.scalar(func.ST_X(facility.location))
-        } if facility.location else None
-    }
-
-def _personnel_to_dict(p):
-    return {
-        'id': p.id,
-        'base_facility_id': p.base_facility_id,
-        'name': p.name,
-        'role': p.role,
-        'skills': p.skills,
-        'status': p.status,
-        'current_assignment': p.current_assignment,
-        'contact_number': p.contact_number,
-        'last_updated': p.last_updated.isoformat() if p.last_updated else None,
-    }
-
-def _vehicle_to_dict(v):
-    return {
-        'id': v.id,
-        'home_facility_id': v.home_facility_id,
-        'vehicle_type': v.vehicle_type,
-        'license_plate': v.license_plate,
-        'current_location': {
-            'lat': db.session.scalar(func.ST_Y(v.current_location)),
-            'lng': db.session.scalar(func.ST_X(v.current_location))
-        } if v.current_location else None,
-        'status': v.status,
-        'capacity_load': v.capacity_load,
-        'assigned_to': v.assigned_to,
-        'last_updated': v.last_updated.isoformat() if v.last_updated else None,
-    }
-
-def _supply_item_to_dict(s):
-    return {
-        'id': s.id,
-        'facility_id': s.facility_id,
-        'item_name': s.item_name,
-        'quantity_current': s.quantity_current,
-        'quantity_capacity': s.quantity_capacity,
-        'unit': s.unit,
-        'status': s.status,
-        'last_updated': s.last_updated.isoformat() if s.last_updated else None,
-    }
 
 # --- API Endpoints ---
 @app.route('/login', methods=['POST'])
@@ -330,7 +238,7 @@ def auth_status():
     else:
         return jsonify({'authenticated': False}), 401
     
-# Updated login_required decorator to handle list of roles
+# login_required decorator to handle list of roles
 def login_required(role=None):
     def decorator(f):
         @wraps(f)
@@ -353,8 +261,8 @@ def login_required(role=None):
 
 
 @app.route('/api/facilities', methods=['GET'])
-@login_required(role=[ 'command', 'admin'])  # All authenticated users can view facilities
-def get_facilities():
+@login_required(role=[ 'command', 'admin','field'])  # All authenticated users can view facilities
+def get_facilities_by_type():
     """
     Retrieves a list of all emergency facilities.
     Supports optional filtering by type (e.g., /api/facilities?type=Hospital).
@@ -416,6 +324,22 @@ def get_high_risk_zones():
     except Exception as e:
         print(f"Error fetching high-risk zones: {e}")
         return jsonify({'error': 'Failed to retrieve flood risk zones', 'details': str(e)}), 500
+    
+from .alert_service import init_alert_service, register_socket_events, alert_service
+
+# Initialize alert service
+init_alert_service(app, socketio)
+
+# Register socket events
+register_socket_events(socketio)
+
+@app.route('/api/rainfall', methods=['GET'])
+@login_required(role=['command', 'admin'])
+def get_rainfall():
+    from .alert_service import alert_service
+    if alert_service is None:
+        return {"error": "Alert service not initialized"}, 500
+    return alert_service.get_rainfall_data()
 
 @app.route('/api/facilities/<int:facility_id>/resources', methods=['GET'])
 @login_required(role=['command', 'admin'])  # Only command/admin can view detailed resources
@@ -480,254 +404,8 @@ def get_facility_resources(facility_id):
         return jsonify({'error': 'Failed to retrieve facility resources', 'details': str(e)}), 500
     
 #---api endpoints for resources.js---
-
-@app.route('/api/supply_items', methods=['GET'])
-@login_required(role=['command', 'admin', 'field'])
-def get_supply_items():
-    """Retrieves all supply items."""
-    try:
-        items = SupplyItem.query.all()
-        return jsonify([_supply_item_to_dict(item) for item in items]), 200
-    except Exception as e:
-        logger.error(f"Error fetching supply items: {e}")
-        return jsonify({'error': 'Failed to retrieve supply items', 'details': str(e)}), 500
-
-@app.route('/api/supply_items', methods=['POST'])
-@login_required(role=['admin', 'command'])
-def add_supply_item():
-    """Adds a new supply item."""
-    try:
-        data = request.get_json()
-        if not data or not all(k in data for k in ['item_name', 'quantity_current', 'unit', 'facility_id']):
-            return jsonify({"error": "Missing required supply item data (item_name, quantity_current, unit, facility_id)"}), 400
-        
-        new_item = SupplyItem(
-            item_name=data['item_name'],
-            quantity_current=data['quantity_current'],
-            quantity_capacity=data.get('quantity_capacity'),
-            unit=data['unit'],
-            status=data.get('status', 'adequate'),
-            facility_id=data['facility_id'],
-            last_updated=datetime.now(pytz.utc)
-        )
-        db.session.add(new_item)
-        db.session.commit()
-        return jsonify(_supply_item_to_dict(new_item)), 201
-    except Exception as e:
-        db.session.rollback()
-        logger.error(f"Error adding supply item: {e}")
-        return jsonify({"error": str(e)}), 500
-
-@app.route('/api/supply_items/<int:item_id>', methods=['PUT', 'PATCH'])
-@login_required(role=['admin', 'command'])
-def update_supply_item(item_id):
-    """Updates a supply item by ID."""
-    try:
-        updates = request.get_json()
-        if not updates:
-            return jsonify({"error": "No update data provided"}), 400
-        
-        item = db.session.query(SupplyItem).get(item_id)
-        if not item:
-            return jsonify({"error": "Supply item not found"}), 404
-        
-        for key, value in updates.items():
-            if hasattr(item, key):
-                setattr(item, key, value)
-        item.last_updated = datetime.now(pytz.utc)
-        db.session.commit()
-        return jsonify(_supply_item_to_dict(item)), 200
-    except Exception as e:
-        db.session.rollback()
-        logger.error(f"Error updating supply item {item_id}: {e}")
-        return jsonify({"error": str(e)}), 500
-
-@app.route('/api/supply_items/<int:item_id>', methods=['DELETE'])
-@login_required(role=['admin', 'command'])
-def delete_supply_item(item_id):
-    """Deletes a supply item by ID."""
-    try:
-        item = db.session.query(SupplyItem).get(item_id)
-        if not item:
-            return jsonify({"error": "Supply item not found"}), 404
-        db.session.delete(item)
-        db.session.commit()
-        return jsonify({"status": "Supply item deleted successfully", "id": item_id}), 200
-    except Exception as e:
-        db.session.rollback()
-        logger.error(f"Error deleting supply item {item_id}: {e}")
-        return jsonify({"error": str(e)}), 500
-
-
-@app.route('/api/personnel', methods=['GET'])
-@login_required(role=['command', 'admin', 'field'])
-def get_personnel():
-    """Retrieves all personnel."""
-    try:
-        personnel = Personnel.query.all()
-        return jsonify([_personnel_to_dict(p) for p in personnel]), 200
-    except Exception as e:
-        logger.error(f"Error fetching personnel: {e}")
-        return jsonify({'error': 'Failed to retrieve personnel', 'details': str(e)}), 500
-
-@app.route('/api/personnel', methods=['POST'])
-@login_required(role=['admin', 'command'])
-def add_personnel():
-    """Adds new personnel."""
-    try:
-        data = request.get_json()
-        if not data or not all(k in data for k in ['name', 'role']):
-            return jsonify({"error": "Missing required personnel data (name, role)"}), 400
-        
-        new_person = Personnel(
-            name=data['name'],
-            role=data['role'],
-            skills=data.get('skills'),
-            status=data.get('status', 'available'),
-            current_assignment=data.get('current_assignment'),
-            contact_number=data.get('contact_number'),
-            base_facility_id=data.get('base_facility_id'),
-            last_updated=datetime.now(pytz.utc)
-        )
-        db.session.add(new_person)
-        db.session.commit()
-        return jsonify(_personnel_to_dict(new_person)), 201
-    except Exception as e:
-        db.session.rollback()
-        logger.error(f"Error adding personnel: {e}")
-        return jsonify({"error": str(e)}), 500
-
-@app.route('/api/personnel/<int:personnel_id>', methods=['PUT', 'PATCH'])
-@login_required(role=['admin', 'command'])
-def update_personnel(personnel_id):
-    """Updates personnel by ID."""
-    try:
-        updates = request.get_json()
-        if not updates:
-            return jsonify({"error": "No update data provided"}), 400
-        
-        person = db.session.query(Personnel).get(personnel_id)
-        if not person:
-            return jsonify({"error": "Personnel not found"}), 404
-        
-        for key, value in updates.items():
-            if hasattr(person, key):
-                setattr(person, key, value)
-        person.last_updated = datetime.now(pytz.utc)
-        db.session.commit()
-        return jsonify(_personnel_to_dict(person)), 200
-    except Exception as e:
-        db.session.rollback()
-        logger.error(f"Error updating personnel {personnel_id}: {e}")
-        return jsonify({"error": str(e)}), 500
-
-@app.route('/api/personnel/<int:personnel_id>', methods=['DELETE'])
-@login_required(role=['admin', 'command'])
-def delete_personnel(personnel_id):
-    """Deletes personnel by ID."""
-    try:
-        person = db.session.query(Personnel).get(personnel_id)
-        if not person:
-            return jsonify({"error": "Personnel not found"}), 404
-        db.session.delete(person)
-        db.session.commit()
-        return jsonify({"status": "Personnel deleted successfully", "id": personnel_id}), 200
-    except Exception as e:
-        db.session.rollback()
-        logger.error(f"Error deleting personnel {personnel_id}: {e}")
-        return jsonify({"error": str(e)}), 500
-
-
-@app.route('/api/vehicles', methods=['GET'])
-@login_required(role=['command', 'admin', 'field'])
-def get_vehicles():
-    """Retrieves all vehicles."""
-    try:
-        vehicles = Vehicle.query.all()
-        return jsonify([_vehicle_to_dict(v) for v in vehicles]), 200
-    except Exception as e:
-        logger.error(f"Error fetching vehicles: {e}")
-        return jsonify({'error': 'Failed to retrieve vehicles', 'details': str(e)}), 500
-
-@app.route('/api/vehicles', methods=['POST'])
-@login_required(role=['admin', 'command'])
-def add_vehicle():
-    """Adds a new vehicle."""
-    try:
-        data = request.get_json()
-        if not data or not all(k in data for k in ['vehicle_type', 'license_plate']):
-            return jsonify({"error": "Missing required vehicle data (vehicle_type, license_plate)"}), 400
-        
-        current_location_point = None
-        if 'lat' in data and 'lng' in data:
-            current_location_point = func.ST_SetSRID(func.ST_MakePoint(data['lng'], data['lat']), 4326)
-
-        new_vehicle = Vehicle(
-            vehicle_type=data['vehicle_type'],
-            license_plate=data['license_plate'],
-            current_location=current_location_point,
-            status=data.get('status', 'available'),
-            capacity_load=data.get('capacity_load'),
-            assigned_to=data.get('assigned_to'),
-            home_facility_id=data.get('home_facility_id'),
-            last_updated=datetime.now(pytz.utc)
-        )
-        db.session.add(new_vehicle)
-        db.session.commit()
-        return jsonify(_vehicle_to_dict(new_vehicle)), 201
-    except Exception as e:
-        db.session.rollback()
-        logger.error(f"Error adding vehicle: {e}")
-        return jsonify({"error": str(e)}), 500
-
-@app.route('/api/vehicles/<int:vehicle_id>', methods=['PUT', 'PATCH'])
-@login_required(role=['admin', 'command'])
-def update_vehicle(vehicle_id):
-    """Updates a vehicle by ID."""
-    try:
-        updates = request.get_json()
-        if not updates:
-            return jsonify({"error": "No update data provided"}), 400
-        
-        vehicle = db.session.query(Vehicle).get(vehicle_id)
-        if not vehicle:
-            return jsonify({"error": "Vehicle not found"}), 404
-        
-        if 'lat' in updates and 'lng' in updates:
-            vehicle.current_location = func.ST_SetSRID(func.ST_MakePoint(updates['lng'], updates['lat']), 4326)
-            del updates['lat']
-            del updates['lng']
-
-        for key, value in updates.items():
-            if hasattr(vehicle, key):
-                setattr(vehicle, key, value)
-        vehicle.last_updated = datetime.now(pytz.utc)
-        db.session.commit()
-        return jsonify(_vehicle_to_dict(vehicle)), 200
-    except Exception as e:
-        db.session.rollback()
-        logger.error(f"Error updating vehicle {vehicle_id}: {e}")
-        return jsonify({"error": str(e)}), 500
-
-@app.route('/api/vehicles/<int:vehicle_id>', methods=['DELETE'])
-@login_required(role=['admin', 'command'])
-def delete_vehicle(vehicle_id):
-    """Deletes a vehicle by ID."""
-    try:
-        vehicle = db.session.query(Vehicle).get(vehicle_id)
-        if not vehicle:
-            return jsonify({"error": "Vehicle not found"}), 404
-        db.session.delete(vehicle)
-        db.session.commit()
-        return jsonify({"status": "Vehicle deleted successfully", "id": vehicle_id}), 200
-    except Exception as e:
-        db.session.rollback()
-        logger.error(f"Error deleting vehicle {vehicle_id}: {e}")
-        return jsonify({"error": str(e)}), 500
-       
-
-@app.route('/api/dashboard/summary', methods=['GET'])
-@login_required(role=['field','command', 'admin'])  # Only command/admin can view dashboard summary
+@app.route('/api/resourcessummary', methods=['GET'])
+@login_required(role=['field','command', 'admin'])  
 def get_dashboard_summary():
     """
     Provides aggregated summaries for the dashboard: supplies, vehicles, personnel, and shelters.
@@ -857,7 +535,492 @@ def get_dashboard_summary():
     except Exception as e:
         logging.error(f"Error fetching dashboard summary: {e}")
         return jsonify({'error': 'Failed to retrieve dashboard summary', 'details': str(e)}), 500
+    
+@app.route('/api/resources/facilities', methods=['GET'])
+@login_required(role=['command', 'admin','field']) 
+def get_facilities():
+    """Get all facilities grouped by type"""
+    try:
+        facilities = EmergencyFacility.query.all()
+        
+        # Group facilities by type
+        grouped_facilities = {
+            'hospitals': [],
+            'supply_centers': [],
+            'ngo_centers': [],
+            'command_centers': [],
+            'shelters': []
+        }
+        
+        for facility in facilities:
+            facility_data = {
+                'id': facility.id,
+                'name': facility.name,
+                'type': facility.type,
+                'status': facility.status,
+                'contact_info': facility.contact_info,
+                'capacity_overall': facility.capacity_overall,
+                'description': facility.description,
+                'last_updated': facility.last_updated.isoformat() if facility.last_updated else None
+            }
+            
+            if facility.type == 'hospital':
+                grouped_facilities['hospitals'].append(facility_data)
+            elif facility.type == 'supply_center':
+                grouped_facilities['supply_centers'].append(facility_data)
+            elif facility.type == 'ngo_center':
+                grouped_facilities['ngo_centers'].append(facility_data)
+            elif facility.type == 'command_center':
+                grouped_facilities['command_centers'].append(facility_data)
+            elif facility.type == 'shelter':
+                grouped_facilities['shelters'].append(facility_data)
+        
+        return jsonify({'success': True, 'facilities': grouped_facilities})
+    
+    except Exception as e:
+        logging.error(f"Error fetching facilities: {str(e)}")
+        return jsonify({'success': False, 'error': str(e)}), 500
 
+@app.route('/api/resources/supplies/<int:facility_id>', methods=['GET'])
+@login_required(role=['command', 'admin','field']) 
+def get_facility_supplies(facility_id):
+    """Get all supplies for a specific facility"""
+    try:
+        facility = EmergencyFacility.query.get_or_404(facility_id)
+        supplies = SupplyItem.query.filter_by(facility_id=facility_id).all()
+        
+        supplies_data = []
+        for supply in supplies:
+            supplies_data.append({
+                'id': supply.id,
+                'item_name': supply.item_name,
+                'quantity_current': supply.quantity_current,
+                'quantity_capacity': supply.quantity_capacity,
+                'unit': supply.unit,
+                'status': supply.status,
+                'last_updated': supply.last_updated.isoformat() if supply.last_updated else None
+            })
+        
+        return jsonify({
+            'success': True,
+            'facility': {
+                'id': facility.id,
+                'name': facility.name,
+                'type': facility.type
+            },
+            'supplies': supplies_data
+        })
+    
+    except Exception as e:
+        logging.error(f"Error fetching supplies for facility {facility_id}: {str(e)}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/resources/supplies', methods=['POST'])
+@login_required(role=['command', 'admin']) 
+def add_supply_item():
+    """Add a new supply item to a facility"""
+    try:
+        data = request.json
+        
+        new_supply = SupplyItem(
+            facility_id=data['facility_id'],
+            item_name=data['item_name'],
+            quantity_current=data.get('quantity_current', 0),
+            quantity_capacity=data.get('quantity_capacity'),
+            unit=data.get('unit', 'units'),
+            status=data.get('status', 'adequate'),
+            last_updated=datetime.utcnow()
+        )
+        
+        db.session.add(new_supply)
+        db.session.commit()
+        
+        return jsonify({
+            'success': True,
+            'supply': {
+                'id': new_supply.id,
+                'item_name': new_supply.item_name,
+                'quantity_current': new_supply.quantity_current,
+                'quantity_capacity': new_supply.quantity_capacity,
+                'unit': new_supply.unit,
+                'status': new_supply.status
+            }
+        })
+    
+    except Exception as e:
+        db.session.rollback()
+        logging.error(f"Error adding supply item: {str(e)}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/resources/supplies/<int:supply_id>', methods=['PUT'])
+@login_required(role=['command', 'admin']) 
+def update_supply_item(supply_id):
+    """Update an existing supply item"""
+    try:
+        supply = SupplyItem.query.get_or_404(supply_id)
+        data = request.json
+        
+        supply.item_name = data.get('item_name', supply.item_name)
+        supply.quantity_current = data.get('quantity_current', supply.quantity_current)
+        supply.quantity_capacity = data.get('quantity_capacity', supply.quantity_capacity)
+        supply.unit = data.get('unit', supply.unit)
+        supply.status = data.get('status', supply.status)
+        supply.last_updated = datetime.utcnow()
+        
+        db.session.commit()
+        
+        return jsonify({'success': True, 'message': 'Supply item updated successfully'})
+    
+    except Exception as e:
+        db.session.rollback()
+        logging.error(f"Error updating supply item {supply_id}: {str(e)}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/resources/supplies/<int:supply_id>', methods=['DELETE'])
+@login_required(role=['command', 'admin']) 
+def delete_supply_item(supply_id):
+    """Delete a supply item"""
+    try:
+        supply = SupplyItem.query.get_or_404(supply_id)
+        db.session.delete(supply)
+        db.session.commit()
+        
+        return jsonify({'success': True, 'message': 'Supply item deleted successfully'})
+    
+    except Exception as e:
+        db.session.rollback()
+        logging.error(f"Error deleting supply item {supply_id}: {str(e)}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/resources/vehicles/<int:facility_id>', methods=['GET'])
+@login_required(role=['command', 'admin','field']) 
+def get_facility_vehicles(facility_id):
+    """Get all vehicles for a specific facility"""
+    try:
+        facility = EmergencyFacility.query.get_or_404(facility_id)
+        vehicles = Vehicle.query.filter_by(home_facility_id=facility_id).all()
+        
+        vehicles_data = []
+        for vehicle in vehicles:
+            vehicles_data.append({
+                'id': vehicle.id,
+                'vehicle_type': vehicle.vehicle_type,
+                'license_plate': vehicle.license_plate,
+                'status': vehicle.status,
+                'capacity_load': vehicle.capacity_load,
+                'assigned_to': vehicle.assigned_to,
+                'last_updated': vehicle.last_updated.isoformat() if vehicle.last_updated else None
+            })
+        
+        return jsonify({
+            'success': True,
+            'facility': {
+                'id': facility.id,
+                'name': facility.name,
+                'type': facility.type
+            },
+            'vehicles': vehicles_data
+        })
+    
+    except Exception as e:
+        logging.error(f"Error fetching vehicles for facility {facility_id}: {str(e)}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/resources/vehicles', methods=['POST'])
+@login_required(role=['command', 'admin']) 
+def add_vehicle():
+    """Add a new vehicle to a facility"""
+    try:
+        data = request.json
+        
+        new_vehicle = Vehicle(
+            home_facility_id=data['facility_id'],
+            vehicle_type=data['vehicle_type'],
+            license_plate=data.get('license_plate'),
+            status=data.get('status', 'available'),
+            capacity_load=data.get('capacity_load'),
+            assigned_to=data.get('assigned_to'),
+            last_updated=datetime.utcnow()
+        )
+        
+        db.session.add(new_vehicle)
+        db.session.commit()
+        
+        return jsonify({
+            'success': True,
+            'vehicle': {
+                'id': new_vehicle.id,
+                'vehicle_type': new_vehicle.vehicle_type,
+                'license_plate': new_vehicle.license_plate,
+                'status': new_vehicle.status,
+                'capacity_load': new_vehicle.capacity_load,
+                'assigned_to': new_vehicle.assigned_to
+            }
+        })
+    
+    except Exception as e:
+        db.session.rollback()
+        logging.error(f"Error adding vehicle: {str(e)}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/resources/vehicles/<int:vehicle_id>', methods=['PUT'])
+@login_required(role=['command', 'admin']) 
+def update_vehicle(vehicle_id):
+    """Update an existing vehicle"""
+    try:
+        vehicle = Vehicle.query.get_or_404(vehicle_id)
+        data = request.json
+        
+        vehicle.vehicle_type = data.get('vehicle_type', vehicle.vehicle_type)
+        vehicle.license_plate = data.get('license_plate', vehicle.license_plate)
+        vehicle.status = data.get('status', vehicle.status)
+        vehicle.capacity_load = data.get('capacity_load', vehicle.capacity_load)
+        vehicle.assigned_to = data.get('assigned_to', vehicle.assigned_to)
+        vehicle.last_updated = datetime.utcnow()
+        
+        db.session.commit()
+        
+        return jsonify({'success': True, 'message': 'Vehicle updated successfully'})
+    
+    except Exception as e:
+        db.session.rollback()
+        logging.error(f"Error updating vehicle {vehicle_id}: {str(e)}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/resources/vehicles/<int:vehicle_id>', methods=['DELETE'])
+@login_required(role=['command', 'admin']) 
+def delete_vehicle(vehicle_id):
+    """Delete a vehicle"""
+    try:
+        vehicle = Vehicle.query.get_or_404(vehicle_id)
+        db.session.delete(vehicle)
+        db.session.commit()
+        
+        return jsonify({'success': True, 'message': 'Vehicle deleted successfully'})
+    
+    except Exception as e:
+        db.session.rollback()
+        logging.error(f"Error deleting vehicle {vehicle_id}: {str(e)}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/resources/personnel/<int:facility_id>', methods=['GET'])
+@login_required(role=['command', 'admin','field']) 
+def get_facility_personnel(facility_id):
+    """Get all personnel for a specific facility"""
+    try:
+        facility = EmergencyFacility.query.get_or_404(facility_id)
+        personnel = Personnel.query.filter_by(base_facility_id=facility_id).all()
+        
+        personnel_data = []
+        for person in personnel:
+            personnel_data.append({
+                'id': person.id,
+                'name': person.name,
+                'role': person.role,
+                'skills': person.skills,
+                'status': person.status,
+                'current_assignment': person.current_assignment,
+                'contact_number': person.contact_number,
+                'last_updated': person.last_updated.isoformat() if person.last_updated else None
+            })
+        
+        return jsonify({
+            'success': True,
+            'facility': {
+                'id': facility.id,
+                'name': facility.name,
+                'type': facility.type
+            },
+            'personnel': personnel_data
+        })
+    
+    except Exception as e:
+        logging.error(f"Error fetching personnel for facility {facility_id}: {str(e)}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/resources/personnel', methods=['POST'])
+@login_required(role=['command', 'admin']) 
+def add_personnel():
+    """Add new personnel to a facility"""
+    try:
+        data = request.json
+        
+        new_personnel = Personnel(
+            base_facility_id=data['facility_id'],
+            name=data['name'],
+            role=data['role'],
+            skills=data.get('skills'),
+            status=data.get('status', 'available'),
+            current_assignment=data.get('current_assignment'),
+            contact_number=data.get('contact_number'),
+            last_updated=datetime.utcnow()
+        )
+        
+        db.session.add(new_personnel)
+        db.session.commit()
+        
+        return jsonify({
+            'success': True,
+            'personnel': {
+                'id': new_personnel.id,
+                'name': new_personnel.name,
+                'role': new_personnel.role,
+                'skills': new_personnel.skills,
+                'status': new_personnel.status,
+                'current_assignment': new_personnel.current_assignment,
+                'contact_number': new_personnel.contact_number
+            }
+        })
+    
+    except Exception as e:
+        db.session.rollback()
+        logging.error(f"Error adding personnel: {str(e)}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/resources/personnel/<int:personnel_id>', methods=['PUT'])
+@login_required(role=['command', 'admin']) 
+def update_personnel(personnel_id):
+    """Update existing personnel"""
+    try:
+        personnel = Personnel.query.get_or_404(personnel_id)
+        data = request.json
+        
+        personnel.name = data.get('name', personnel.name)
+        personnel.role = data.get('role', personnel.role)
+        personnel.skills = data.get('skills', personnel.skills)
+        personnel.status = data.get('status', personnel.status)
+        personnel.current_assignment = data.get('current_assignment', personnel.current_assignment)
+        personnel.contact_number = data.get('contact_number', personnel.contact_number)
+        personnel.last_updated = datetime.utcnow()
+        
+        db.session.commit()
+        
+        return jsonify({'success': True, 'message': 'Personnel updated successfully'})
+    
+    except Exception as e:
+        db.session.rollback()
+        logging.error(f"Error updating personnel {personnel_id}: {str(e)}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/resources/personnel/<int:personnel_id>', methods=['DELETE'])
+@login_required(role=['command', 'admin']) 
+def delete_personnel(personnel_id):
+    """Delete personnel"""
+    try:
+        personnel = Personnel.query.get_or_404(personnel_id)
+        db.session.delete(personnel)
+        db.session.commit()
+        
+        return jsonify({'success': True, 'message': 'Personnel deleted successfully'})
+    
+    except Exception as e:
+        db.session.rollback()
+        logging.error(f"Error deleting personnel {personnel_id}: {str(e)}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/resources/shelters', methods=['GET'])
+@login_required(role=['command', 'admin','field']) 
+def get_shelters():
+    """Get all shelter facilities"""
+    try:
+        shelters = EmergencyFacility.query.filter_by(type='shelter').all()
+        
+        shelters_data = []
+        for shelter in shelters:
+            shelters_data.append({
+                'id': shelter.id,
+                'name': shelter.name,
+                'capacity_overall': shelter.capacity_overall,
+                'status': shelter.status,
+                'contact_info': shelter.contact_info,
+                'description': shelter.description,
+                'last_updated': shelter.last_updated.isoformat() if shelter.last_updated else None
+            })
+        
+        return jsonify({'success': True, 'shelters': shelters_data})
+    
+    except Exception as e:
+        logging.error(f"Error fetching shelters: {str(e)}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/resources/shelters/<int:shelter_id>', methods=['PUT'])
+@login_required(role=['command', 'admin']) 
+def update_shelter(shelter_id):
+    """Update shelter information"""
+    try:
+        shelter = EmergencyFacility.query.get_or_404(shelter_id)
+        data = request.json
+        
+        shelter.name = data.get('name', shelter.name)
+        shelter.capacity_overall = data.get('capacity_overall', shelter.capacity_overall)
+        shelter.status = data.get('status', shelter.status)
+        shelter.contact_info = data.get('contact_info', shelter.contact_info)
+        shelter.description = data.get('description', shelter.description)
+        shelter.last_updated = datetime.utcnow()
+        
+        db.session.commit()
+        
+        return jsonify({'success': True, 'message': 'Shelter updated successfully'})
+    
+    except Exception as e:
+        db.session.rollback()
+        logging.error(f"Error updating shelter {shelter_id}: {str(e)}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/resources/shelters', methods=['POST'])
+@login_required(role=['command', 'admin']) 
+def add_shelter():
+    """Add a new shelter"""
+    try:
+        data = request.json
+        
+        new_shelter = EmergencyFacility(
+            name=data['name'],
+            type='shelter',
+            location=data['location'],  # You'll need to handle geometry data properly
+            capacity_overall=data.get('capacity_overall'),
+            status=data.get('status', 'operational'),
+            contact_info=data.get('contact_info'),
+            description=data.get('description'),
+            last_updated=datetime.utcnow()
+        )
+        
+        db.session.add(new_shelter)
+        db.session.commit()
+        
+        return jsonify({
+            'success': True,
+            'shelter': {
+                'id': new_shelter.id,
+                'name': new_shelter.name,
+                'capacity_overall': new_shelter.capacity_overall,
+                'status': new_shelter.status,
+                'contact_info': new_shelter.contact_info,
+                'description': new_shelter.description
+            }
+        })
+    
+    except Exception as e:
+        db.session.rollback()
+        logging.error(f"Error adding shelter: {str(e)}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+    
+@app.route('/api/resources/shelters/<int:shelter_id>', methods=['DELETE'])
+@login_required(role=['command', 'admin'])
+def delete_shelter(shelter_id):  
+    """Delete shelter"""
+    try:
+        shelter = EmergencyFacility.query.get_or_404(shelter_id)
+        db.session.delete(shelter)
+        db.session.commit()
+        
+        return jsonify({'success': True, 'message': 'Shelter deleted successfully'})
+        
+    except Exception as e:
+        db.session.rollback()
+        logging.error(f"Error deleting Shelter {shelter_id}: {str(e)}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+    
 #---api endpoints for response.js---
 @app.route('/api/response-actions', methods=['GET'])
 @login_required(role=['command', 'admin', 'field']) # Field can view, command/admin can manage
@@ -946,7 +1109,7 @@ def update_response_action(action_id):
         logger.error(f"Error updating response action {action_id}: {e}")
         return jsonify({"error": str(e)}), 500
 
-# Also add your new delete endpoint
+# delete endpoint
 @app.route('/api/response-actions/<int:action_id>', methods=['DELETE'])
 @login_required(role=['command', 'admin'])  # Only command/admin can delete actions
 def delete_response_action(action_id):
@@ -964,18 +1127,3 @@ def delete_response_action(action_id):
         logger.error(f"Error deleting response action {action_id}: {e}")
         return jsonify({"error": str(e)}), 500
 
-from .alert_service import init_alert_service, register_socket_events, alert_service
-
-# Initialize alert service
-init_alert_service(app, socketio)
-
-# Register socket events
-register_socket_events(socketio)
-
-@app.route('/api/rainfall', methods=['GET'])
-@login_required(role=['command', 'admin'])
-def get_rainfall():
-    from .alert_service import alert_service
-    if alert_service is None:
-        return {"error": "Alert service not initialized"}, 500
-    return alert_service.get_rainfall_data()
